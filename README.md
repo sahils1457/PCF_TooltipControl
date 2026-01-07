@@ -1,5 +1,50 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="DonSchia" constructor="FetchXmlDetailsList" version="2.0.1" display-name-key="FetchXml DetailsList" description-key="FluentUI DetailsList for subgrids with FetchXml, pagination, and enhanced features" control-type="standard">
+    
+    <!-- Property used to store the bound field - can be any text field -->
+    <property name="sampleProperty" display-name-key="Bound Field" description-key="Bind this control to any text field on the form" of-type="SingleLine.Text" usage="bound" required="true" />
+    
+    <!-- FetchXml Query Parameter -->
+    <property name="FetchXml" display-name-key="FetchXml Query" description-key="Complete FetchXml query with [RECORDID] placeholder" of-type="Multiple" usage="input" required="false" />
+    
+    <!-- Column Layout JSON Parameter -->
+    <property name="ColumnLayoutJson" display-name-key="Column Layout (JSON)" description-key="JSON array defining column layout and configuration" of-type="Multiple" usage="input" required="false" />
+    
+    <!-- Record ID Placeholder -->
+    <property name="RecordIdPlaceholder" display-name-key="Record ID Placeholder" description-key="Placeholder text in FetchXml to replace with record ID (default: [RECORDID])" of-type="SingleLine.Text" usage="input" required="false" />
+    
+    <!-- Override Record ID Field Name -->
+    <property name="OverriddenRecordIdFieldName" display-name-key="Override Record ID Field" description-key="Optional: Use a lookup field on the form instead of current record ID" of-type="SingleLine.Text" usage="input" required="false" />
+    
+    <!-- Items Per Page for Pagination -->
+    <property name="ItemsPerPage" display-name-key="Items Per Page" description-key="Number of items to display per page (default: 50)" of-type="Whole.None" usage="input" required="false" />
+    
+    <!-- Debug Mode -->
+    <property name="DebugMode" display-name-key="Debug Mode" description-key="Enable debug mode (On/Off)" of-type="Enum" usage="input" required="false">
+      <value name="Off" display-name-key="Off">0</value>
+      <value name="On" display-name-key="On">1</value>
+    </property>
+    
+    <!-- Resources -->
+    <resources>
+      <code path="index.ts" order="1"/>
+      <css path="css/FetchXmlDetailsList.css" order="1" />
+      <resx path="strings/FetchXmlDetailsList.1033.resx" version="1.0.0" />
+    </resources>
+    
+    <!-- Feature usage -->
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true" />
+      <uses-feature name="Utility" required="false" />
+    </feature-usage>
+  </control>
+</manifest>
+
+
+
 import { IInputs, IOutputs } from "./generated/ManifestTypes";
-import { DynamicDetailsList, IDynamicDetailsListProps } from "./DynamicsDetailsList";
+import { DynamicDetailsList } from "./DynamicsDetailsList";
 import { GetSampleData } from "./GetSampleData";
 import * as React from "react";
 import * as ReactDOM from "react-dom";
@@ -8,16 +53,13 @@ export class FetchXmlDetailsList implements ComponentFramework.StandardControl<I
     private _container: HTMLDivElement;
     private _context: ComponentFramework.Context<IInputs>;
     private _notifyOutputChanged: () => void;
-    private _detailsList: DynamicDetailsList | null = null;
     private _isTestHarness: boolean = false;
     private _currentPage: number = 1;
     private _pageSize: number = 50;
     private _totalRecords: number = 0;
     
     constructor() {
-        this._container = document.createElement("div");
-        this._container.style.width = "100%";
-        this._container.style.height = "100%";
+        // Constructor should be empty or minimal
     }
 
     public init(
@@ -26,34 +68,45 @@ export class FetchXmlDetailsList implements ComponentFramework.StandardControl<I
         state: ComponentFramework.Dictionary,
         container: HTMLDivElement
     ): void {
-        this._context = context;
-        this._notifyOutputChanged = notifyOutputChanged;
-        this._container = container;
-        
-        // Check if running in test harness
-        this._isTestHarness = this.isTestHarness();
-        
-        // Access parameters using 'any' to bypass TypeScript restrictions
-        const params = context.parameters as any;
-        
-        // Set page size from input parameter or default
-        const itemsPerPage = params.ItemsPerPage?.raw;
-        this._pageSize = itemsPerPage ? itemsPerPage : 50;
-        
-        console.log("FetchXmlDetailsList initialized", {
-            isTestHarness: this._isTestHarness,
-            pageSize: this._pageSize
-        });
+        try {
+            this._context = context;
+            this._notifyOutputChanged = notifyOutputChanged;
+            this._container = container;
+            
+            // Set container styles
+            if (this._container) {
+                this._container.style.width = "100%";
+                this._container.style.height = "100%";
+            }
+            
+            // Check if running in test harness
+            this._isTestHarness = this.isTestHarness();
+            
+            // Access parameters safely
+            const params = context.parameters as any;
+            
+            // Set page size from input parameter or default
+            const itemsPerPage = params.ItemsPerPage?.raw;
+            this._pageSize = itemsPerPage ? itemsPerPage : 50;
+            
+            console.log("FetchXmlDetailsList initialized", {
+                isTestHarness: this._isTestHarness,
+                pageSize: this._pageSize
+            });
+        } catch (error) {
+            console.error("Error in init:", error);
+            this.showError("Initialization failed: " + (error as Error).message);
+        }
     }
 
     public updateView(context: ComponentFramework.Context<IInputs>): void {
-        this._context = context;
-        
         try {
+            this._context = context;
+            
             // Re-check if test harness on each update
             this._isTestHarness = this.isTestHarness();
             
-            // Access parameters using 'any' to bypass TypeScript restrictions
+            // Access parameters safely
             const params = context.parameters as any;
             
             // Check if we have valid FetchXml and ColumnLayout
@@ -78,7 +131,7 @@ export class FetchXmlDetailsList implements ComponentFramework.StandardControl<I
     private isTestHarness(): boolean {
         // Check if we're in the test harness by checking for WebApi
         try {
-            const webAPI = (this._context as any).webAPI;
+            const webAPI = (this._context as any)?.webAPI;
             return !webAPI || typeof webAPI.retrieveMultipleRecords !== 'function';
         } catch {
             return true;
@@ -86,94 +139,98 @@ export class FetchXmlDetailsList implements ComponentFramework.StandardControl<I
     }
 
     private loadSampleData(): void {
-        console.log("Loading sample data for test harness");
-        
-        const sampleData = GetSampleData();
-        const startIndex = (this._currentPage - 1) * this._pageSize;
-        const endIndex = startIndex + this._pageSize;
-        const paginatedItems = sampleData.dataItems.slice(startIndex, endIndex);
-        
-        this._totalRecords = sampleData.dataItems.length;
-        
-        const props: any = {
-            context: this._context,
-            items: paginatedItems,
-            columns: sampleData.columns,
-            primaryEntityName: sampleData.primaryEntityName,
-            isDebugMode: this.getDebugMode(),
-            baseD365Url: this.getBaseEnvironmentUrl(),
-            pagination: {
-                currentPage: this._currentPage,
-                pageSize: this._pageSize,
-                totalRecords: this._totalRecords,
-                onPageChange: (page: number) => this.handlePageChange(page)
-            }
-        };
-        
-        this.renderDetailsList(props);
+        try {
+            console.log("Loading sample data for test harness");
+            
+            const sampleData = GetSampleData();
+            const startIndex = (this._currentPage - 1) * this._pageSize;
+            const endIndex = startIndex + this._pageSize;
+            const paginatedItems = sampleData.dataItems.slice(startIndex, endIndex);
+            
+            this._totalRecords = sampleData.dataItems.length;
+            
+            const props: any = {
+                context: this._context,
+                items: paginatedItems,
+                columns: sampleData.columns,
+                primaryEntityName: sampleData.primaryEntityName,
+                isDebugMode: this.getDebugMode(),
+                baseD365Url: this.getBaseEnvironmentUrl(),
+                pagination: {
+                    currentPage: this._currentPage,
+                    pageSize: this._pageSize,
+                    totalRecords: this._totalRecords,
+                    onPageChange: (page: number) => this.handlePageChange(page)
+                }
+            };
+            
+            this.renderDetailsList(props);
+        } catch (error) {
+            console.error("Error loading sample data:", error);
+            this.showError("Failed to load sample data: " + (error as Error).message);
+        }
     }
 
     private async loadDynamicsData(): Promise<void> {
-        const debugMode = this.getDebugMode();
-        
-        if (debugMode) {
-            debugger;
-        }
-
-        // Access parameters using 'any' to bypass TypeScript restrictions
-        const params = this._context.parameters as any;
-        
-        // Get parameters
-        let fetchXml = params.FetchXml?.raw || "";
-        const columnLayoutJson = params.ColumnLayoutJson?.raw || "[]";
-        const recordIdPlaceholder = params.RecordIdPlaceholder?.raw || "[RECORDID]";
-        const overriddenRecordIdFieldName = params.OverriddenRecordIdFieldName?.raw;
-
-        if (!fetchXml || fetchXml.trim() === "") {
-            console.warn("No FetchXml provided, loading sample data instead");
-            this.loadSampleData();
-            return;
-        }
-
-        // Get record ID
-        let recordId = this.getRecordId(overriddenRecordIdFieldName || undefined);
-        
-        if (!recordId) {
-            this.showError("Could not determine record ID");
-            return;
-        }
-
-        // Replace placeholder with actual record ID
-        fetchXml = fetchXml.replace(new RegExp(recordIdPlaceholder, 'g'), recordId);
-
-        // Add pagination to FetchXml
-        const paginatedFetchXml = this.addPaginationToFetchXml(fetchXml, this._currentPage, this._pageSize);
-
-        if (debugMode) {
-            console.log("DynamicDetailsList fetchXml:", paginatedFetchXml);
-            console.log("DynamicDetailsList columnLayout:", columnLayoutJson);
-        }
-
-        // Parse columns
-        let columns: any[];
         try {
-            // Clean up the JSON string in case it has issues
-            const cleanedJson = columnLayoutJson.trim();
-            if (!cleanedJson || cleanedJson === "" || cleanedJson === "val") {
-                console.warn("Invalid or empty ColumnLayoutJson, loading sample data");
+            const debugMode = this.getDebugMode();
+            
+            if (debugMode) {
+                debugger;
+            }
+
+            // Access parameters safely
+            const params = this._context.parameters as any;
+            
+            // Get parameters
+            let fetchXml = params.FetchXml?.raw || "";
+            const columnLayoutJson = params.ColumnLayoutJson?.raw || "[]";
+            const recordIdPlaceholder = params.RecordIdPlaceholder?.raw || "[RECORDID]";
+            const overriddenRecordIdFieldName = params.OverriddenRecordIdFieldName?.raw;
+
+            if (!fetchXml || fetchXml.trim() === "") {
+                console.warn("No FetchXml provided, loading sample data instead");
                 this.loadSampleData();
                 return;
             }
-            columns = JSON.parse(cleanedJson);
-        } catch (error) {
-            console.error("Failed to parse ColumnLayoutJson:", error);
-            console.warn("Loading sample data instead");
-            this.loadSampleData();
-            return;
-        }
 
-        // Execute FetchXml
-        try {
+            // Get record ID
+            let recordId = this.getRecordId(overriddenRecordIdFieldName || undefined);
+            
+            if (!recordId) {
+                this.showError("Could not determine record ID");
+                return;
+            }
+
+            // Replace placeholder with actual record ID
+            fetchXml = fetchXml.replace(new RegExp(recordIdPlaceholder, 'g'), recordId);
+
+            // Add pagination to FetchXml
+            const paginatedFetchXml = this.addPaginationToFetchXml(fetchXml, this._currentPage, this._pageSize);
+
+            if (debugMode) {
+                console.log("DynamicDetailsList fetchXml:", paginatedFetchXml);
+                console.log("DynamicDetailsList columnLayout:", columnLayoutJson);
+            }
+
+            // Parse columns
+            let columns: any[];
+            try {
+                const cleanedJson = columnLayoutJson.trim();
+                if (!cleanedJson || cleanedJson === "" || cleanedJson === "val") {
+                    console.warn("Invalid or empty ColumnLayoutJson, loading sample data");
+                    this.loadSampleData();
+                    return;
+                }
+                columns = JSON.parse(cleanedJson);
+            } catch (error) {
+                console.error("Failed to parse ColumnLayoutJson:", error);
+                console.warn("Loading sample data instead");
+                this.loadSampleData();
+                return;
+            }
+
+            // Execute FetchXml
             const entityName = this.extractEntityNameFromFetchXml(fetchXml);
             const webAPI = (this._context as any).webAPI;
             const encodedFetchXml = encodeURIComponent(paginatedFetchXml);
@@ -219,29 +276,29 @@ export class FetchXmlDetailsList implements ComponentFramework.StandardControl<I
     }
 
     private getDebugMode(): boolean {
-        const params = this._context.parameters as any;
-        const debugValue = params.DebugMode?.raw;
-        // DebugMode is an enum: "0" = Off, "1" = On
-        return debugValue === "1";
+        try {
+            const params = this._context?.parameters as any;
+            const debugValue = params?.DebugMode?.raw;
+            return debugValue === "1";
+        } catch {
+            return false;
+        }
     }
 
     private getRecordId(overriddenFieldName?: string): string | null {
         try {
             if (overriddenFieldName) {
-                // Try to get ID from specified lookup field
                 const lookupValue = (this._context as any).parameters[overriddenFieldName];
                 if (lookupValue && lookupValue.raw && lookupValue.raw[0]) {
                     return lookupValue.raw[0].id;
                 }
             }
 
-            // Try to get current record ID from page context
             const pageContext = (this._context as any).page;
             if (pageContext && pageContext.entityId) {
                 return pageContext.entityId;
             }
 
-            // Fallback: try to get from mode
             const mode = this._context.mode as any;
             if (mode && mode.contextInfo && mode.contextInfo.entityId) {
                 return mode.contextInfo.entityId;
@@ -256,39 +313,33 @@ export class FetchXmlDetailsList implements ComponentFramework.StandardControl<I
 
     private getBaseEnvironmentUrl(): string {
         try {
-            // Try multiple methods to get the base URL
-            const pageContext = (this._context as any).page;
+            const pageContext = (this._context as any)?.page;
             
-            // Method 1: Try getClientUrl (works in Dynamics)
             if (pageContext && typeof pageContext.getClientUrl === 'function') {
                 try {
                     return pageContext.getClientUrl();
                 } catch (e) {
-                    console.debug("getClientUrl failed, trying alternative methods");
+                    console.debug("getClientUrl failed");
                 }
             }
             
-            // Method 2: Try to get from context
             if (this._context && (this._context as any).client) {
                 const client = (this._context as any).client;
-                if (client.getClient && typeof client.getClient === 'function') {
+                if (client?.getClient && typeof client.getClient === 'function') {
                     const clientInfo = client.getClient();
-                    if (clientInfo && clientInfo.baseUrl) {
+                    if (clientInfo?.baseUrl) {
                         return clientInfo.baseUrl;
                     }
                 }
             }
             
-            // Method 3: Fallback to window location (works in test harness)
             if (typeof window !== 'undefined' && window.location) {
                 return window.location.origin;
             }
             
-            // Method 4: Return empty string as last resort
             return "";
         } catch (error) {
-            // Silently handle error in test harness
-            console.debug("Could not get base environment URL (test harness mode):", error);
+            console.debug("Could not get base environment URL:", error);
             return typeof window !== 'undefined' && window.location ? window.location.origin : "";
         }
     }
@@ -299,12 +350,10 @@ export class FetchXmlDetailsList implements ComponentFramework.StandardControl<I
     }
 
     private addPaginationToFetchXml(fetchXml: string, page: number, pageSize: number): string {
-        // Remove existing count/page attributes
         let xml = fetchXml.replace(/\s+count=['"][^'"]*['"]/g, '');
         xml = xml.replace(/\s+page=['"][^'"]*['"]/g, '');
         xml = xml.replace(/\s+paging-cookie=['"][^'"]*['"]/g, '');
 
-        // Add new pagination attributes to fetch element
         xml = xml.replace(
             /<fetch/,
             `<fetch count="${pageSize}" page="${page}"`
@@ -315,7 +364,6 @@ export class FetchXmlDetailsList implements ComponentFramework.StandardControl<I
 
     private async getTotalRecordCount(entityName: string, fetchXml: string): Promise<number> {
         try {
-            // Create count query
             let countFetchXml = fetchXml.replace(/<fetch[^>]*>/, '<fetch aggregate="true">');
             countFetchXml = countFetchXml.replace(
                 /<entity[^>]*>/,
@@ -329,7 +377,7 @@ export class FetchXmlDetailsList implements ComponentFramework.StandardControl<I
                 `?fetchXml=${encodedFetchXml}`
             );
             
-            if (result && result.entities && result.entities.length > 0) {
+            if (result?.entities && result.entities.length > 0) {
                 return parseInt(result.entities[0].count) || 0;
             }
             
@@ -346,17 +394,29 @@ export class FetchXmlDetailsList implements ComponentFramework.StandardControl<I
     }
 
     private renderDetailsList(props: any): void {
-        // Clear container
-        while (this._container.firstChild) {
-            this._container.removeChild(this._container.firstChild);
-        }
+        try {
+            if (!this._container) {
+                console.error("Container not initialized");
+                return;
+            }
 
-        // Create element to render React component
-        const element = React.createElement(DynamicDetailsList, props);
-        ReactDOM.render(element, this._container);
+            // Clear container
+            while (this._container.firstChild) {
+                this._container.removeChild(this._container.firstChild);
+            }
+
+            // Create React element and render
+            const element = React.createElement(DynamicDetailsList, props);
+            ReactDOM.render(element, this._container);
+        } catch (error) {
+            console.error("Error rendering details list:", error);
+            this.showError("Failed to render: " + (error as Error).message);
+        }
     }
 
     private showError(message: string): void {
+        if (!this._container) return;
+        
         this._container.innerHTML = `
             <div style="padding: 20px; background-color: #fef0f0; border: 1px solid #f5c6cb; border-radius: 4px;">
                 <strong style="color: #a94442;">Error:</strong>
@@ -370,8 +430,12 @@ export class FetchXmlDetailsList implements ComponentFramework.StandardControl<I
     }
 
     public destroy(): void {
-        if (this._container) {
-            ReactDOM.unmountComponentAtNode(this._container);
+        try {
+            if (this._container) {
+                ReactDOM.unmountComponentAtNode(this._container);
+            }
+        } catch (error) {
+            console.error("Error in destroy:", error);
         }
     }
 }
