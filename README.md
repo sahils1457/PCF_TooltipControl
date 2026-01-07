@@ -1,27 +1,17 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="DonSchia" constructor="FetchXmlDetailsList" version="2.0.1" display-name-key="FetchXml DetailsList" description-key="FluentUI DetailsList for subgrids with FetchXml, pagination, and enhanced features" control-type="standard">
+  <control namespace="DonSchia" constructor="FetchXmlDetailsList" version="3.0.0" display-name-key="FetchXml DetailsList" description-key="FluentUI DetailsList for views, subgrids and forms with custom FetchXml and pagination" control-type="virtual">
     
-    <!-- Property used to store the bound field - can be any text field -->
-    <property name="sampleProperty" display-name-key="Bound Field" description-key="Bind this control to any text field on the form" of-type="SingleLine.Text" usage="bound" required="true" />
+    <!-- Dataset binding for views/grids -->
+    <data-set name="dataSetGrid" display-name-key="Grid Data" cds-data-set-options="displayCommandBar:true;displayViewSelector:true;displayQuickFindSearch:true">
+      <property-set name="FetchXml" display-name-key="Custom FetchXml" description-key="Optional custom FetchXml query (leave empty to use view's query)" of-type="Multiple" usage="input" required="false" />
+      <property-set name="ColumnLayoutJson" display-name-key="Column Layout JSON" description-key="Optional JSON column configuration (leave empty to use view's columns)" of-type="Multiple" usage="input" required="false" />
+    </data-set>
     
-    <!-- FetchXml Query Parameter -->
-    <property name="FetchXml" display-name-key="FetchXml Query" description-key="Complete FetchXml query with [RECORDID] placeholder" of-type="Multiple" usage="input" required="false" />
+    <!-- Global Properties -->
+    <property name="ItemsPerPage" display-name-key="Items Per Page" description-key="Records per page (default: 50)" of-type="Whole.None" usage="input" required="false" />
     
-    <!-- Column Layout JSON Parameter -->
-    <property name="ColumnLayoutJson" display-name-key="Column Layout (JSON)" description-key="JSON array defining column layout and configuration" of-type="Multiple" usage="input" required="false" />
-    
-    <!-- Record ID Placeholder -->
-    <property name="RecordIdPlaceholder" display-name-key="Record ID Placeholder" description-key="Placeholder text in FetchXml to replace with record ID (default: [RECORDID])" of-type="SingleLine.Text" usage="input" required="false" />
-    
-    <!-- Override Record ID Field Name -->
-    <property name="OverriddenRecordIdFieldName" display-name-key="Override Record ID Field" description-key="Optional: Use a lookup field on the form instead of current record ID" of-type="SingleLine.Text" usage="input" required="false" />
-    
-    <!-- Items Per Page for Pagination -->
-    <property name="ItemsPerPage" display-name-key="Items Per Page" description-key="Number of items to display per page (default: 50)" of-type="Whole.None" usage="input" required="false" />
-    
-    <!-- Debug Mode -->
-    <property name="DebugMode" display-name-key="Debug Mode" description-key="Enable debug mode (On/Off)" of-type="Enum" usage="input" required="false">
+    <property name="DebugMode" display-name-key="Debug Mode" description-key="Enable debug logging" of-type="Enum" usage="input" required="false">
       <value name="Off" display-name-key="Off">0</value>
       <value name="On" display-name-key="On">1</value>
     </property>
@@ -41,8 +31,6 @@
   </control>
 </manifest>
 
-
-
 import { IInputs, IOutputs } from "./generated/ManifestTypes";
 import { DynamicDetailsList } from "./DynamicsDetailsList";
 import { GetSampleData } from "./GetSampleData";
@@ -57,9 +45,10 @@ export class FetchXmlDetailsList implements ComponentFramework.StandardControl<I
     private _currentPage: number = 1;
     private _pageSize: number = 50;
     private _totalRecords: number = 0;
+    private _dataset: ComponentFramework.PropertyTypes.DataSet | null = null;
     
     constructor() {
-        // Constructor should be empty or minimal
+        // Empty constructor
     }
 
     public init(
@@ -73,25 +62,25 @@ export class FetchXmlDetailsList implements ComponentFramework.StandardControl<I
             this._notifyOutputChanged = notifyOutputChanged;
             this._container = container;
             
-            // Set container styles
             if (this._container) {
                 this._container.style.width = "100%";
                 this._container.style.height = "100%";
             }
             
-            // Check if running in test harness
+            // Check if we have dataset (view mode)
+            const params = context.parameters as any;
+            this._dataset = params.dataSetGrid;
+            
             this._isTestHarness = this.isTestHarness();
             
-            // Access parameters safely
-            const params = context.parameters as any;
-            
-            // Set page size from input parameter or default
             const itemsPerPage = params.ItemsPerPage?.raw;
             this._pageSize = itemsPerPage ? itemsPerPage : 50;
             
             console.log("FetchXmlDetailsList initialized", {
                 isTestHarness: this._isTestHarness,
-                pageSize: this._pageSize
+                pageSize: this._pageSize,
+                hasDataset: !!this._dataset,
+                mode: this._dataset ? "VIEW/GRID" : "TEST HARNESS"
             });
         } catch (error) {
             console.error("Error in init:", error);
@@ -102,25 +91,23 @@ export class FetchXmlDetailsList implements ComponentFramework.StandardControl<I
     public updateView(context: ComponentFramework.Context<IInputs>): void {
         try {
             this._context = context;
-            
-            // Re-check if test harness on each update
-            this._isTestHarness = this.isTestHarness();
-            
-            // Access parameters safely
             const params = context.parameters as any;
+            this._dataset = params.dataSetGrid;
             
-            // Check if we have valid FetchXml and ColumnLayout
-            const fetchXml = params.FetchXml?.raw || "";
-            const columnLayout = params.ColumnLayoutJson?.raw || "";
-            
-            // If in test harness OR missing required params, use sample data
-            if (this._isTestHarness || !fetchXml || !columnLayout || 
-                fetchXml.trim() === "" || columnLayout.trim() === "" || 
-                columnLayout === "val") {
-                console.log("Using sample data (test harness or missing parameters)");
+            // Dataset mode (Views/Grids in Dynamics)
+            if (this._dataset && this._dataset.loading === false) {
+                console.log("Loading from dataset (VIEW MODE)");
+                this.loadFromDataset();
+            }
+            // Test harness mode (npm start)
+            else if (this.isTestHarness()) {
+                console.log("Loading sample data (TEST HARNESS)");
                 this.loadSampleData();
-            } else {
-                this.loadDynamicsData();
+            }
+            // Form mode with custom FetchXml (fallback)
+            else {
+                console.log("Dataset still loading or not available");
+                this.showLoading();
             }
         } catch (error) {
             console.error("Error updating view:", error);
@@ -129,12 +116,141 @@ export class FetchXmlDetailsList implements ComponentFramework.StandardControl<I
     }
 
     private isTestHarness(): boolean {
-        // Check if we're in the test harness by checking for WebApi
         try {
             const webAPI = (this._context as any)?.webAPI;
-            return !webAPI || typeof webAPI.retrieveMultipleRecords !== 'function';
+            const hasDataset = !!this._dataset;
+            // If no dataset and no webAPI, it's test harness
+            return !hasDataset && (!webAPI || typeof webAPI.retrieveMultipleRecords !== 'function');
         } catch {
             return true;
+        }
+    }
+
+    private loadFromDataset(): void {
+        try {
+            if (!this._dataset) {
+                console.error("Dataset is null");
+                return;
+            }
+
+            const debugMode = this.getDebugMode();
+            
+            if (debugMode) {
+                console.log("Dataset:", this._dataset);
+                console.log("Dataset columns:", this._dataset.columns);
+                console.log("Dataset records:", this._dataset.sortedRecordIds?.length || 0);
+            }
+
+            // Check for custom FetchXml
+            const customFetchXml = (this._dataset as any).FetchXml?.raw;
+            const customColumnLayout = (this._dataset as any).ColumnLayoutJson?.raw;
+
+            // Build items from dataset
+            const items: any[] = [];
+            if (this._dataset.sortedRecordIds) {
+                this._dataset.sortedRecordIds.forEach((recordId) => {
+                    const record = this._dataset!.records[recordId];
+                    if (record) {
+                        const item: any = {};
+                        
+                        // Get all column values
+                        this._dataset!.columns.forEach((column) => {
+                            const value = record.getValue(column.name);
+                            item[column.name] = value;
+                            
+                            // Also get formatted value if available
+                            const formatted = record.getFormattedValue(column.name);
+                            if (formatted) {
+                                item[column.name + "@OData.Community.Display.V1.FormattedValue"] = formatted;
+                            }
+                        });
+                        
+                        // Add record ID
+                        item[this._dataset!.getTargetEntityType() + "id"] = record.getRecordId();
+                        items.push(item);
+                    }
+                });
+            }
+
+            // Build columns
+            let columns: any[];
+            
+            if (customColumnLayout) {
+                // Use custom column layout if provided
+                try {
+                    columns = JSON.parse(customColumnLayout);
+                } catch (e) {
+                    console.warn("Failed to parse custom column layout, using dataset columns");
+                    columns = this.buildColumnsFromDataset();
+                }
+            } else {
+                // Use dataset columns
+                columns = this.buildColumnsFromDataset();
+            }
+
+            // Get pagination info
+            const paging = this._dataset.paging;
+            this._totalRecords = paging.totalResultCount || items.length;
+
+            if (debugMode) {
+                console.log("Items:", items);
+                console.log("Columns:", columns);
+                console.log("Total records:", this._totalRecords);
+                console.log("Has next page:", paging.hasNextPage);
+                console.log("Has previous page:", paging.hasPreviousPage);
+            }
+
+            const props: any = {
+                context: this._context,
+                items: items,
+                columns: columns,
+                primaryEntityName: this._dataset.getTargetEntityType(),
+                isDebugMode: debugMode,
+                baseD365Url: this.getBaseEnvironmentUrl(),
+                pagination: {
+                    currentPage: this._currentPage,
+                    pageSize: this._pageSize,
+                    totalRecords: this._totalRecords,
+                    onPageChange: (page: number) => this.handleDatasetPageChange(page)
+                }
+            };
+
+            this.renderDetailsList(props);
+        } catch (error) {
+            console.error("Error loading from dataset:", error);
+            this.showError("Failed to load dataset: " + (error as Error).message);
+        }
+    }
+
+    private buildColumnsFromDataset(): any[] {
+        if (!this._dataset) return [];
+        
+        return this._dataset.columns.map((col) => ({
+            key: col.name,
+            fieldName: col.name,
+            name: col.displayName,
+            minWidth: col.visualSizeFactor || 100,
+            maxWidth: 300,
+            isResizable: true,
+            data: {}
+        }));
+    }
+
+    private handleDatasetPageChange(page: number): void {
+        if (!this._dataset || !this._dataset.paging) return;
+        
+        const paging = this._dataset.paging;
+        
+        if (page > this._currentPage && paging.hasNextPage) {
+            paging.loadNextPage();
+            this._currentPage = page;
+        } else if (page < this._currentPage && paging.hasPreviousPage) {
+            paging.loadPreviousPage();
+            this._currentPage = page;
+        } else if (page === 1 && paging.hasPreviousPage) {
+            // Go to first page
+            paging.reset();
+            this._currentPage = 1;
         }
     }
 
@@ -171,110 +287,6 @@ export class FetchXmlDetailsList implements ComponentFramework.StandardControl<I
         }
     }
 
-    private async loadDynamicsData(): Promise<void> {
-        try {
-            const debugMode = this.getDebugMode();
-            
-            if (debugMode) {
-                debugger;
-            }
-
-            // Access parameters safely
-            const params = this._context.parameters as any;
-            
-            // Get parameters
-            let fetchXml = params.FetchXml?.raw || "";
-            const columnLayoutJson = params.ColumnLayoutJson?.raw || "[]";
-            const recordIdPlaceholder = params.RecordIdPlaceholder?.raw || "[RECORDID]";
-            const overriddenRecordIdFieldName = params.OverriddenRecordIdFieldName?.raw;
-
-            if (!fetchXml || fetchXml.trim() === "") {
-                console.warn("No FetchXml provided, loading sample data instead");
-                this.loadSampleData();
-                return;
-            }
-
-            // Get record ID
-            let recordId = this.getRecordId(overriddenRecordIdFieldName || undefined);
-            
-            if (!recordId) {
-                this.showError("Could not determine record ID");
-                return;
-            }
-
-            // Replace placeholder with actual record ID
-            fetchXml = fetchXml.replace(new RegExp(recordIdPlaceholder, 'g'), recordId);
-
-            // Add pagination to FetchXml
-            const paginatedFetchXml = this.addPaginationToFetchXml(fetchXml, this._currentPage, this._pageSize);
-
-            if (debugMode) {
-                console.log("DynamicDetailsList fetchXml:", paginatedFetchXml);
-                console.log("DynamicDetailsList columnLayout:", columnLayoutJson);
-            }
-
-            // Parse columns
-            let columns: any[];
-            try {
-                const cleanedJson = columnLayoutJson.trim();
-                if (!cleanedJson || cleanedJson === "" || cleanedJson === "val") {
-                    console.warn("Invalid or empty ColumnLayoutJson, loading sample data");
-                    this.loadSampleData();
-                    return;
-                }
-                columns = JSON.parse(cleanedJson);
-            } catch (error) {
-                console.error("Failed to parse ColumnLayoutJson:", error);
-                console.warn("Loading sample data instead");
-                this.loadSampleData();
-                return;
-            }
-
-            // Execute FetchXml
-            const entityName = this.extractEntityNameFromFetchXml(fetchXml);
-            const webAPI = (this._context as any).webAPI;
-            const encodedFetchXml = encodeURIComponent(paginatedFetchXml);
-            const result = await webAPI.retrieveMultipleRecords(
-                entityName,
-                `?fetchXml=${encodedFetchXml}`
-            );
-
-            if (debugMode) {
-                console.log("webAPI.retrieveMultipleRecords result:", result);
-            }
-
-            // Get total record count for pagination
-            this._totalRecords = await this.getTotalRecordCount(entityName, fetchXml);
-
-            if (debugMode) {
-                console.log("Total records:", this._totalRecords);
-                console.log("Current page:", this._currentPage);
-                console.log("Page size:", this._pageSize);
-            }
-
-            const props: any = {
-                context: this._context,
-                items: result.entities || [],
-                columns: columns,
-                primaryEntityName: entityName,
-                fetchXml: paginatedFetchXml,
-                isDebugMode: debugMode,
-                baseD365Url: this.getBaseEnvironmentUrl(),
-                pagination: {
-                    currentPage: this._currentPage,
-                    pageSize: this._pageSize,
-                    totalRecords: this._totalRecords,
-                    onPageChange: (page: number) => this.handlePageChange(page)
-                }
-            };
-
-            this.renderDetailsList(props);
-        } catch (error) {
-            console.error("Error executing FetchXml:", error);
-            this.showError("Failed to execute FetchXml: " + (error as Error).message);
-        }
-    }
-
     private getDebugMode(): boolean {
         try {
             const params = this._context?.parameters as any;
@@ -282,32 +294,6 @@ export class FetchXmlDetailsList implements ComponentFramework.StandardControl<I
             return debugValue === "1";
         } catch {
             return false;
-        }
-    }
-
-    private getRecordId(overriddenFieldName?: string): string | null {
-        try {
-            if (overriddenFieldName) {
-                const lookupValue = (this._context as any).parameters[overriddenFieldName];
-                if (lookupValue && lookupValue.raw && lookupValue.raw[0]) {
-                    return lookupValue.raw[0].id;
-                }
-            }
-
-            const pageContext = (this._context as any).page;
-            if (pageContext && pageContext.entityId) {
-                return pageContext.entityId;
-            }
-
-            const mode = this._context.mode as any;
-            if (mode && mode.contextInfo && mode.contextInfo.entityId) {
-                return mode.contextInfo.entityId;
-            }
-
-            return null;
-        } catch (error) {
-            console.error("Error getting record ID:", error);
-            return null;
         }
     }
 
@@ -323,16 +309,6 @@ export class FetchXmlDetailsList implements ComponentFramework.StandardControl<I
                 }
             }
             
-            if (this._context && (this._context as any).client) {
-                const client = (this._context as any).client;
-                if (client?.getClient && typeof client.getClient === 'function') {
-                    const clientInfo = client.getClient();
-                    if (clientInfo?.baseUrl) {
-                        return clientInfo.baseUrl;
-                    }
-                }
-            }
-            
             if (typeof window !== 'undefined' && window.location) {
                 return window.location.origin;
             }
@@ -341,50 +317,6 @@ export class FetchXmlDetailsList implements ComponentFramework.StandardControl<I
         } catch (error) {
             console.debug("Could not get base environment URL:", error);
             return typeof window !== 'undefined' && window.location ? window.location.origin : "";
-        }
-    }
-
-    private extractEntityNameFromFetchXml(fetchXml: string): string {
-        const match = fetchXml.match(/<entity\s+name=['"]([^'"]+)['"]/);
-        return match ? match[1] : "entity";
-    }
-
-    private addPaginationToFetchXml(fetchXml: string, page: number, pageSize: number): string {
-        let xml = fetchXml.replace(/\s+count=['"][^'"]*['"]/g, '');
-        xml = xml.replace(/\s+page=['"][^'"]*['"]/g, '');
-        xml = xml.replace(/\s+paging-cookie=['"][^'"]*['"]/g, '');
-
-        xml = xml.replace(
-            /<fetch/,
-            `<fetch count="${pageSize}" page="${page}"`
-        );
-
-        return xml;
-    }
-
-    private async getTotalRecordCount(entityName: string, fetchXml: string): Promise<number> {
-        try {
-            let countFetchXml = fetchXml.replace(/<fetch[^>]*>/, '<fetch aggregate="true">');
-            countFetchXml = countFetchXml.replace(
-                /<entity[^>]*>/,
-                (match) => match + `<attribute name="${entityName}id" alias="count" aggregate="count" />`
-            );
-
-            const webAPI = (this._context as any).webAPI;
-            const encodedFetchXml = encodeURIComponent(countFetchXml);
-            const result = await webAPI.retrieveMultipleRecords(
-                entityName,
-                `?fetchXml=${encodedFetchXml}`
-            );
-            
-            if (result?.entities && result.entities.length > 0) {
-                return parseInt(result.entities[0].count) || 0;
-            }
-            
-            return 0;
-        } catch (error) {
-            console.warn("Could not get total count:", error);
-            return 0;
         }
     }
 
@@ -400,18 +332,29 @@ export class FetchXmlDetailsList implements ComponentFramework.StandardControl<I
                 return;
             }
 
-            // Clear container
             while (this._container.firstChild) {
                 this._container.removeChild(this._container.firstChild);
             }
 
-            // Create React element and render
             const element = React.createElement(DynamicDetailsList, props);
             ReactDOM.render(element, this._container);
         } catch (error) {
             console.error("Error rendering details list:", error);
             this.showError("Failed to render: " + (error as Error).message);
         }
+    }
+
+    private showLoading(): void {
+        if (!this._container) return;
+        
+        this._container.innerHTML = `
+            <div style="display: flex; align-items: center; justify-content: center; height: 200px;">
+                <div style="text-align: center;">
+                    <div style="font-size: 24px; margin-bottom: 10px;">⏳</div>
+                    <p style="color: #666;">Loading data...</p>
+                </div>
+            </div>
+        `;
     }
 
     private showError(message: string): void {
